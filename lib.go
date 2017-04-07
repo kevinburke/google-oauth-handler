@@ -74,6 +74,15 @@ type Config struct {
 	CallbackPath string
 }
 
+// Auth is returned in the callback to Handle().
+type Auth struct {
+	// The Google email address for this user.
+	Email *mail.Address
+	// A Client that's configured to use the Google credentials
+	Client *http.Client
+	Token  *oauth2.Token
+}
+
 // An Authenticator transparently handles authentication with Google. Create an
 // Authenticator by calling NewAuthenticator(Config{}).
 type Authenticator struct {
@@ -125,7 +134,7 @@ func NewAuthenticator(c Config) *Authenticator {
 // URL returns a link to the Google auth URL for this Authenticator. If
 // the http.Request contains a query parameter named "g", the user will be
 // redirected to that page upon returning from Google.
-func (a *Authenticator) URL(w http.ResponseWriter, r *http.Request) string {
+func (a *Authenticator) URL(r *http.Request) string {
 	var uri string
 	if g := r.URL.Query().Get("g"); g != "" {
 		// prevent open redirect by only using the Path part
@@ -144,8 +153,7 @@ func (a *Authenticator) URL(w http.ResponseWriter, r *http.Request) string {
 	}
 	bits, err := json.Marshal(st)
 	if err != nil {
-		rest.ServerError(w, r, err)
-		return ""
+		panic(err)
 	}
 	encoded := opaqueByte(bits, a.secretKey)
 	return a.conf.AuthCodeURL(encoded)
@@ -153,7 +161,7 @@ func (a *Authenticator) URL(w http.ResponseWriter, r *http.Request) string {
 
 // defaultLogin redirects the request to the Google authentication URL.
 func (a *Authenticator) defaultLogin(w http.ResponseWriter, r *http.Request) {
-	u := a.URL(w, r)
+	u := a.URL(r)
 	http.Redirect(w, r, u, http.StatusFound)
 }
 
@@ -180,7 +188,7 @@ func (a *Authenticator) validState(encrypted string) (string, bool) {
 //
 // Handle must handle requests to the CallbackPath (which defaults to
 // /auth/callback) in order to set a valid cookie.
-func (a *Authenticator) Handle(f func(http.ResponseWriter, *http.Request, *oauth2.Token)) http.Handler {
+func (a *Authenticator) Handle(f func(http.ResponseWriter, *http.Request, *Auth)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == a.callback {
 			a.handleGoogleCallback(w, r)
@@ -204,12 +212,17 @@ func (a *Authenticator) Handle(f func(http.ResponseWriter, *http.Request, *oauth
 			a.login.ServeHTTP(w, r)
 			return
 		}
-		if t.Expiry.Before(time.Now().UTC()) {
+		if t.Expiry.Before(time.Now().UTC()) || t.Token.Expiry.Before(time.Now().UTC()) {
 			// TODO logout
 			a.login.ServeHTTP(w, r)
 			return
 		}
-		f(w, r, t.Token)
+		// todo - not super happy with this.
+		f(w, r, &Auth{
+			t.Email,
+			a.conf.Client(r.Context(), t.Token),
+			t.Token,
+		})
 		return
 	})
 }
@@ -248,14 +261,14 @@ func (a *Authenticator) handleGoogleCallback(w http.ResponseWriter, r *http.Requ
 		return err
 	}
 	// TODO verify allowed domains.
-	cookie := a.newCookie(u.Email, tok)
+	cookie := a.newCookie(u.Address(), tok)
 	http.SetCookie(w, cookie)
 	http.Redirect(w, r, currentURL, 302)
 	return errors.New("redirected, make another request")
 }
 
-func (a *Authenticator) newCookie(id string, tok *oauth2.Token) *http.Cookie {
-	t := newToken(id, tok)
+func (a *Authenticator) newCookie(email *mail.Address, tok *oauth2.Token) *http.Cookie {
+	t := newToken(email, tok)
 	b, err := json.Marshal(t)
 	if err != nil {
 		panic(err)
@@ -272,7 +285,7 @@ func (a *Authenticator) newCookie(id string, tok *oauth2.Token) *http.Cookie {
 }
 
 type token struct {
-	ID     string
+	Email  *mail.Address
 	Token  *oauth2.Token
 	Expiry time.Time
 }
@@ -282,9 +295,9 @@ type state struct {
 	Time       time.Time
 }
 
-func newToken(id string, tok *oauth2.Token) *token {
+func newToken(id *mail.Address, tok *oauth2.Token) *token {
 	return &token{
-		ID:     id,
+		Email:  id,
 		Token:  tok,
 		Expiry: time.Now().UTC().Add(DefaultExpiry),
 	}
@@ -309,6 +322,13 @@ type googleUser struct {
 	Gender        string `json:"gender"`
 	Locale        string `json:"locale"`
 	HD            string `json:"hd"`
+}
+
+func (g *googleUser) Address() *mail.Address {
+	return &mail.Address{
+		Name:    g.Name,
+		Address: g.Email,
+	}
 }
 
 func getGoogleUserData(ctx context.Context, client *http.Client) (*googleUser, error) {
