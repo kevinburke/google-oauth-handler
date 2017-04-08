@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	google "github.com/kevinburke/google-oauth-handler"
-	"golang.org/x/oauth2"
 )
 
 var key *[32]byte
@@ -28,8 +27,8 @@ func Example() {
 			"https://www.googleapis.com/auth/gmail.send",
 		},
 	}
-	auth := google.NewAuthenticator(cfg)
-	http.Handle("/", auth.Handle(func(w http.ResponseWriter, r *http.Request, token *oauth2.Token) {
-		fmt.Fprintf(w, "<html><body><h1>Hello World</h1><p>Token: %s</p></body></html>", token.AccessToken)
+	authenticator := google.NewAuthenticator(cfg)
+	http.Handle("/", authenticator.Handle(func(w http.ResponseWriter, r *http.Request, auth *google.Auth) {
+		fmt.Fprintf(w, "<html><body><h1>Hello World</h1><p>Token: %s</p></body></html>", auth.Token.AccessToken)
 	}))
 }
