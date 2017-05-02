@@ -5,7 +5,7 @@ Google.
 
 Create an Authenticator and then insert it as middleware in front of any
 resources you want to protect behind Google login, via authenticator.Handle.
-Handle will call the next middleware with (w, r, *Token), which you can use
+Handle will call the next middleware with (w, r, *Auth), which you can use
 to make requests to the Google API.
 
 The Authenticator handles the OAuth workflow for you, redirecting users to
@@ -50,8 +50,8 @@ func Example() {
 		},
 	}
 	auth := google.NewAuthenticator(cfg)
-	http.Handle("/", auth.Handle(func(w http.ResponseWriter, r *http.Request, token *oauth2.Token) {
-		fmt.Fprintf(w, "<html><body><h1>Hello World</h1><p>Token: %s</p></body></html>", token.AccessToken)
+	http.Handle("/", auth.Handle(func(w http.ResponseWriter, r *http.Request, auth *google.Auth) {
+		fmt.Fprintf(w, "<html><body><h1>Hello World</h1><p>Token: %s</p></body></html>", auth.AccessToken)
 	}))
 }
 ```

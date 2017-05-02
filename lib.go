@@ -194,7 +194,7 @@ func (a *Authenticator) Handle(f func(http.ResponseWriter, *http.Request, *Auth)
 			a.handleGoogleCallback(w, r)
 			return
 		}
-		// Check if the request has a valid cookie, if so allow it.
+		// Check if the request has a valid cookie, if not redirect to login.
 		cookie, err := r.Cookie(cookieName)
 		if err != nil {
 			a.login.ServeHTTP(w, r)
@@ -202,7 +202,7 @@ func (a *Authenticator) Handle(f func(http.ResponseWriter, *http.Request, *Auth)
 		}
 		val, err := unopaqueByte(cookie.Value, a.secretKey)
 		if err != nil {
-			// TODO need a 400 bad request here
+			// Bad cookie. TODO need a 400 bad request here
 			a.login.ServeHTTP(w, r)
 			return
 		}
@@ -212,11 +212,29 @@ func (a *Authenticator) Handle(f func(http.ResponseWriter, *http.Request, *Auth)
 			a.login.ServeHTTP(w, r)
 			return
 		}
-		if t.Expiry.Before(time.Now().UTC()) || t.Token.Expiry.Before(time.Now().UTC()) {
+		now := time.Now().UTC()
+		if t.Expiry.Before(now) {
 			// TODO logout
 			a.login.ServeHTTP(w, r)
 			return
 		}
+		// It's possible the AccessToken has expired by the time the user makes
+		// a request. We don't want to log them out, so try to refresh the token
+		// now if necessary.
+		src := a.conf.TokenSource(r.Context(), t.Token)
+		newToken, err := src.Token()
+		if err != nil {
+			// some sort of error getting a token, ask user to log in again.
+			a.login.ServeHTTP(w, r)
+			return
+		}
+		if t.Token.AccessToken != newToken.AccessToken {
+			// we got a new token
+			t.Token = newToken
+			cookie := a.newCookie(t)
+			http.SetCookie(w, cookie)
+		}
+
 		// todo - not super happy with this.
 		f(w, r, &Auth{
 			t.Email,
@@ -261,14 +279,14 @@ func (a *Authenticator) handleGoogleCallback(w http.ResponseWriter, r *http.Requ
 		return err
 	}
 	// TODO verify allowed domains.
-	cookie := a.newCookie(u.Address(), tok)
+	t := newToken(u.Address(), tok)
+	cookie := a.newCookie(t)
 	http.SetCookie(w, cookie)
 	http.Redirect(w, r, currentURL, 302)
 	return errors.New("redirected, make another request")
 }
 
-func (a *Authenticator) newCookie(email *mail.Address, tok *oauth2.Token) *http.Cookie {
-	t := newToken(email, tok)
+func (a *Authenticator) newCookie(t *token) *http.Cookie {
 	b, err := json.Marshal(t)
 	if err != nil {
 		panic(err)
