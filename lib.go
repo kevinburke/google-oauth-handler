@@ -28,6 +28,8 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
+const version = "0.1"
+
 // DefaultExpiry is the duration of a valid cookie.
 var DefaultExpiry = 14 * 24 * time.Hour
 
