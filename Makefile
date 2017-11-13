@@ -1,14 +1,14 @@
-BUMP_VERSION := $(shell command -v bump_version)
-STATICCHECK := $(shell command -v staticcheck)
+BUMP_VERSION := $(GOPATH)/bin/bump_version
+MEGACHECK := $(GOPATH)/bin/megacheck
 
 SHELL = /bin/bash
 
-vet:
-ifndef STATICCHECK
-	go get -u honnef.co/go/tools/cmd/staticcheck
-endif
+$(MEGACHECK):
+	go get -u honnef.co/go/tools/cmd/megacheck
+
+vet: | $(MEGACHECK)
 	go vet ./...
-	staticcheck ./...
+	$(MEGACHECK) ./...
 
 test: vet
 	go test ./...
@@ -19,8 +19,8 @@ race-test: vet
 install:
 	go install ./...
 
-release: race-test
-ifndef BUMP_VERSION
-	go get github.com/Shyp/bump_version
-endif
+$(BUMP_VERSION):
+	go get -u github.com/Shyp/bump_version
+
+release: race-test | $(BUMP_VERSION)
 	bump_version minor lib.go

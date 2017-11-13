@@ -223,7 +223,7 @@ func (a *Authenticator) Handle(f func(http.ResponseWriter, *http.Request, *Auth)
 		// It's possible the AccessToken has expired by the time the user makes
 		// a request. We don't want to log them out, so try to refresh the token
 		// now if necessary.
-		src := a.conf.TokenSource(r.Context(), t.Token)
+		src := a.conf.TokenSource(wctx(r), t.Token)
 		newToken, err := src.Token()
 		if err != nil {
 			// some sort of error getting a token, ask user to log in again.
@@ -240,10 +240,9 @@ func (a *Authenticator) Handle(f func(http.ResponseWriter, *http.Request, *Auth)
 		// todo - not super happy with this.
 		f(w, r, &Auth{
 			t.Email,
-			a.conf.Client(r.Context(), t.Token),
+			a.conf.Client(wctx(r), t.Token),
 			t.Token,
 		})
-		return
 	})
 }
 
@@ -261,7 +260,7 @@ func (a *Authenticator) handleGoogleCallback(w http.ResponseWriter, r *http.Requ
 		http.Redirect(w, r, "/", 302)
 		return errors.New("invalid state")
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), Timeout)
+	ctx, cancel := context.WithTimeout(wctx(r), Timeout)
 	defer cancel()
 	tok, err := a.conf.Exchange(ctx, code)
 	if err != nil {
