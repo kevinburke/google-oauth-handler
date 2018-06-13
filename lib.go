@@ -129,6 +129,8 @@ func NewAuthenticator(c Config) *Authenticator {
 	}
 	if c.ServeLogin == nil {
 		a.login = http.HandlerFunc(a.defaultLogin)
+	} else {
+		a.login = c.ServeLogin
 	}
 	return a
 }
