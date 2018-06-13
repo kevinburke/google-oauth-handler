@@ -1,19 +1,19 @@
 BUMP_VERSION := $(GOPATH)/bin/bump_version
 MEGACHECK := $(GOPATH)/bin/megacheck
 
-SHELL = /bin/bash
+SHELL = /bin/bash -o pipefail
 
 $(MEGACHECK):
 	go get -u honnef.co/go/tools/cmd/megacheck
 
-vet: | $(MEGACHECK)
+lint: | $(MEGACHECK)
 	go vet ./...
-	$(MEGACHECK) ./...
+	$(MEGACHECK) --ignore='github.com/kevinburke/google-oauth-handler/lib.go:S1002' ./...
 
-test: vet
+test: lint
 	go test ./...
 
-race-test: vet
+race-test: lint
 	go test -race ./...
 
 install:
