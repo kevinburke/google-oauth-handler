@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/mail"
 	"net/url"
+	"sync"
 	"time"
 
 	log "github.com/inconshreveable/log15"
@@ -91,12 +92,22 @@ type Authenticator struct {
 	logger                  log.Logger
 	conf                    *oauth2.Config
 	allowUnencryptedTraffic bool
+	callback                string
+	allowedDomains          []string
+	secretKey               *[32]byte
+
 	// Login gets called when the user must authenticate. The default Login
 	// behavior is to redirect to the Google authentication page.
-	login          http.Handler
-	callback       string
-	allowedDomains []string
-	secretKey      *[32]byte
+	login   http.Handler
+	loginMu sync.Mutex
+}
+
+// SetLogin sets the login handler to h. A convenience handler since this may be
+// configured later than the other parts of the google oauth handler's config.
+func (a *Authenticator) SetLogin(h http.Handler) {
+	a.loginMu.Lock()
+	a.login = h
+	a.loginMu.Unlock()
 }
 
 // NewAuthenticator creates a new Authenticator that can
@@ -120,13 +131,14 @@ func NewAuthenticator(c Config) *Authenticator {
 		c.Logger = handlers.Logger
 	}
 	a := &Authenticator{
-		logger: c.Logger,
-		conf:   conf,
+		logger:                  c.Logger,
+		conf:                    conf,
 		allowUnencryptedTraffic: c.AllowUnencryptedTraffic,
 		allowedDomains:          c.AllowedDomains,
 		secretKey:               c.SecretKey,
 		callback:                c.CallbackPath,
 	}
+	// no need to lock since no one else can call till it's returned
 	if c.ServeLogin == nil {
 		a.login = http.HandlerFunc(a.defaultLogin)
 	} else {
@@ -198,28 +210,31 @@ func (a *Authenticator) Handle(f func(http.ResponseWriter, *http.Request, *Auth)
 			a.handleGoogleCallback(w, r)
 			return
 		}
+		a.loginMu.Lock()
+		login := a.login
+		a.loginMu.Unlock()
 		// Check if the request has a valid cookie, if not redirect to login.
 		cookie, err := r.Cookie(cookieName)
 		if err != nil {
-			a.login.ServeHTTP(w, r)
+			login.ServeHTTP(w, r)
 			return
 		}
 		val, err := unopaqueByte(cookie.Value, a.secretKey)
 		if err != nil {
 			// Bad cookie. TODO need a 400 bad request here
-			a.login.ServeHTTP(w, r)
+			login.ServeHTTP(w, r)
 			return
 		}
 		t := new(token)
 		if err := json.Unmarshal(val, t); err != nil {
 			// TODO clear it
-			a.login.ServeHTTP(w, r)
+			login.ServeHTTP(w, r)
 			return
 		}
 		now := time.Now().UTC()
 		if t.Expiry.Before(now) {
 			// TODO logout
-			a.login.ServeHTTP(w, r)
+			login.ServeHTTP(w, r)
 			return
 		}
 		// It's possible the AccessToken has expired by the time the user makes
@@ -229,7 +244,7 @@ func (a *Authenticator) Handle(f func(http.ResponseWriter, *http.Request, *Auth)
 		newToken, err := src.Token()
 		if err != nil {
 			// some sort of error getting a token, ask user to log in again.
-			a.login.ServeHTTP(w, r)
+			login.ServeHTTP(w, r)
 			return
 		}
 		if t.Token.AccessToken != newToken.AccessToken {
