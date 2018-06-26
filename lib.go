@@ -29,7 +29,7 @@ import (
 	"golang.org/x/oauth2/google"
 )
 
-const Version = "0.4"
+const Version = "0.5"
 
 // DefaultExpiry is the duration of a valid cookie.
 var DefaultExpiry = 14 * 24 * time.Hour
@@ -131,8 +131,8 @@ func NewAuthenticator(c Config) *Authenticator {
 		c.Logger = handlers.Logger
 	}
 	a := &Authenticator{
-		logger:                  c.Logger,
-		conf:                    conf,
+		logger: c.Logger,
+		conf:   conf,
 		allowUnencryptedTraffic: c.AllowUnencryptedTraffic,
 		allowedDomains:          c.AllowedDomains,
 		secretKey:               c.SecretKey,
